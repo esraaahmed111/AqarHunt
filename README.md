@@ -1,6 +1,5 @@
 # Real Estate Recommendation System
 
-# Overview
 This project is a **machine learning-powered real estate system** designed to assist buyers in finding the most relevant properties and help sellers position their listings effectively. The system combines a **KNN-based recommendation engine** with an **ensemble regression model** for price prediction, handling both **numerical** and **categorical data**. The solution uses advanced data processing techniques to ensure accurate predictions and provide personalized property recommendations based on user preferences.
   
 - **Machine Learning Models**:
