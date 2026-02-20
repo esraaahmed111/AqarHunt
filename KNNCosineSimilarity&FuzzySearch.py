@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score
 import scipy.stats as stats
 
 # Load dataset (from local directory)
-df = pd.read_csv('property_finder_sale.csv')  # Update with the correct file path
+df = pd.read_csv('property_finder_sale.csv')
 
 # Set display options for pandas
 pd.set_option("display.max_columns", None)
