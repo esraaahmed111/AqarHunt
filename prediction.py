@@ -1,4 +1,4 @@
-# Import Libraries
+# Import libraries
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -15,7 +15,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
-# Load Data
+# Load data
 df = pd.read_csv('property_finder.csv')
 pd.set_option("display.max_columns", None)
 
@@ -24,7 +24,7 @@ print(df.info())
 print(df.describe())
 
 
-# Data Cleaning
+# Data cleaning
 df = df[df['bathrooms'] != 'None']
 df['bathrooms'] = pd.to_numeric(df['bathrooms'], errors='coerce').astype('Int64')
 df['bedrooms'] = pd.to_numeric(df['bedrooms'], errors='coerce').astype('Int64')
