@@ -22,7 +22,7 @@ print("Dataset Shape:", df.shape)
 print(df.info())
 print(df.describe())
 
-# ============================================================
+
 # Data Cleaning
 df = df[df['bathrooms'] != 'None']
 df['bathrooms'] = pd.to_numeric(df['bathrooms'], errors='coerce').astype('Int64')
