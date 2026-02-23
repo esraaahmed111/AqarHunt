@@ -3,203 +3,237 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestClassifier, BaggingRegressor, HistGradientBoostingRegressor
-from sklearn.preprocessing import LabelEncoder, StandardScaler, RobustScaler, MinMaxScaler, OneHotEncoder, OrdinalEncoder, FunctionTransformer
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.ensemble import BaggingRegressor, HistGradientBoostingRegressor
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeRegressor
+import warnings
+warnings.filterwarnings('ignore')
 
-# Load dataset (from local directory)
-df = pd.read_csv('property_finder_sale.csv')
-df
 
-# Set display options for pandas
+# Load Data
+df = pd.read_csv('property_finder.csv')
 pd.set_option("display.max_columns", None)
 
-# Check dataset info and summary statistics
+print("Dataset Shape:", df.shape)
 print(df.info())
 print(df.describe())
 
-# Check for missing values
-total_missing_values = df.isnull().sum()
-print(total_missing_values)
-
-# Handle missing values
+# ============================================================
+# Data Cleaning
 df = df[df['bathrooms'] != 'None']
 df['bathrooms'] = pd.to_numeric(df['bathrooms'], errors='coerce').astype('Int64')
 df['bedrooms'] = pd.to_numeric(df['bedrooms'], errors='coerce').astype('Int64')
 df = df.dropna(subset=['bedrooms', 'bathrooms'])
+
 df['down_payment_price'] = df['down_payment_price'].fillna(0)
-df['district/compound'] = df['district/compound'].fillna('unknown')
+df['district/compound'] = df['district/compound'].fillna('Unknown')
+
 df['furnished'] = df['furnished'].astype(str).str.strip().str.capitalize()
 
-# Update 'completion_status' based on 'furnished' values
-df.loc[df['completion_status'].isna() & df['furnished'].isin(['Yes', 'Partly']), 'completion_status'] = 'Completed'
-df.loc[df['completion_status'].isna() & df['furnished'].isin(['No']), 'completion_status'] = 'Unknown'
+df['completion_status'] = df['completion_status'].fillna('Unknown')
+df.loc[df['completion_status'] == 'Unknown', 'completion_status'] = df['furnished'].map(
+    {'Yes': 'Completed', 'Partly': 'Completed', 'No': 'Unknown'}
+).fillna('Unknown')
 
-print(df.info())
+for col in df.select_dtypes(include='object').columns:
+    df[col] = df[col].astype(str).str.strip().str.capitalize()
 
-# Check for missing values after handling
-total_missing_values = df.isnull().sum()
-print(total_missing_values)
+df.drop(columns=['url', 'id', 'location_full_name', 'has_view_360',
+                 'amenity_names', 'payment_method', 'listed_date',
+                 'offering_type'], inplace=True)
 
-# Convert 'listed_date' to datetime
-df['listed_date'] = pd.to_datetime(df['listed_date'], format="%Y-%m-%dT%H:%M:%SZ")
-
-# Remove duplicate rows
-duplicates = df.duplicated()
-print(f"Number of duplicate rows: {duplicates.sum()}")
 df = df.drop_duplicates()
 df.reset_index(drop=True, inplace=True)
 
-# Handle categorical column consistency
-categorical_columns = df.select_dtypes(include='object').columns
-for column in categorical_columns:
-    df[column] = df[column].str.capitalize()
+print(f"\nAfter cleaning: {df.shape}")
+print(df.isnull().sum())
 
-# Remove irrelevant columns
-df.drop(columns=['id', 'url+X13A1:V13', 'location_full_name', 'has_view_360', 'amenity_names', 'payment_method', 'listed_date'], inplace=True)
 
-# Apply IQR method to remove outliers from 'price', 'size', 'bedrooms', and 'bathrooms'
+# Outliers
 for col in ['price', 'size', 'bedrooms', 'bathrooms']:
     Q1 = df[col].quantile(0.25)
     Q3 = df[col].quantile(0.75)
     IQR = Q3 - Q1
-    lower_bound = Q1 - 1.5 * IQR
-    upper_bound = Q3 + 1.5 * IQR
-    df = df[(df[col] >= lower_bound) & (df[col] <= upper_bound)]
+    df = df[(df[col] >= Q1 - 1.5 * IQR) & (df[col] <= Q3 + 1.5 * IQR)]
 
-print("Shape of DataFrame after outlier removal:", df.shape)
+print(f"After outlier removal: {df.shape}")
 
-# Visualize data after outlier removal
-plt.figure(figsize=(15, 10))
 
-plt.subplot(2, 2, 1)
-sns.boxplot(y=df['price'])
-plt.title('Box Plot of Price (After Outlier Removal)')
-plt.ylabel('Price')
-
-plt.subplot(2, 2, 2)
-sns.boxplot(y=df['size'])
-plt.title('Box Plot of Size (After Outlier Removal)')
-plt.ylabel('Size')
-
-plt.subplot(2, 2, 3)
-sns.boxplot(y=df['bedrooms'])
-plt.title('Box Plot of Bedrooms (After Outlier Removal)')
-plt.ylabel('Bedroom Count')
-
-plt.subplot(2, 2, 4)
-sns.boxplot(y=df['bathrooms'])
-plt.title('Box Plot of Bathrooms (After Outlier Removal)')
-plt.ylabel('Bathroom Count')
-
+# EDA
+fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+for ax, col in zip(axes.flatten(), ['price', 'size', 'bedrooms', 'bathrooms']):
+    sns.boxplot(y=df[col], ax=ax)
+    ax.set_title(f'Box Plot of {col.capitalize()} (After Outlier Removal)')
 plt.tight_layout()
 plt.show()
 
-# Correlation heatmap for numerical columns
-numeric_df = df.select_dtypes(include=[np.number])
-correlation_matrix = numeric_df.corr()
-plt.figure(figsize=(12, 8))
-sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm')
-plt.title('Correlation Matrix')
+# Price distribution
+plt.figure(figsize=(12, 5))
+sns.histplot(df['price'], bins=40, kde=True, color='steelblue', edgecolor='black')
+plt.axvline(df['price'].mean(), color='red', linestyle='--', label=f'Mean: {df["price"].mean():,.0f} EGP')
+plt.axvline(df['price'].median(), color='green', linestyle='--', label=f'Median: {df["price"].median():,.0f} EGP')
+plt.title('Property Price Distribution')
+plt.xlabel('Price (EGP)')
+plt.ylabel('Frequency')
+plt.legend()
+plt.tight_layout()
 plt.show()
 
-# Prepare for Ensemble Model
-dataset = df.copy()
-categorical_cols = ['property_type', 'city', 'town', 'district/compound', 'completion_status', 'offering_type', 'furnished']
-numerical_cols = ['lat', 'lon', 'bedrooms', 'bathrooms', 'size', 'down_payment_price']  # Removed 'price' from numerical_cols
+# Price by city
+plt.figure(figsize=(12, 5))
+city_med = df.groupby('city')['price'].median().sort_values(ascending=False)
+sns.barplot(x=city_med.index, y=city_med.values, palette='viridis')
+plt.title('Median Price by City')
+plt.xlabel('City')
+plt.ylabel('Median Price (EGP)')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
 
-# Preprocessing steps for numerical and categorical features
-numerical_transformer = MinMaxScaler()
-categorical_transformer = OneHotEncoder(handle_unknown='ignore')
+# Price by property type
+plt.figure(figsize=(12, 5))
+type_med = df.groupby('property_type')['price'].median().sort_values(ascending=False)
+sns.barplot(x=type_med.index, y=type_med.values, palette='magma')
+plt.title('Median Price by Property Type')
+plt.xlabel('Property Type')
+plt.ylabel('Median Price (EGP)')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
 
-# Create a ColumnTransformer to apply different transformations to different columns
-column_trans = ColumnTransformer(
-    transformers=[
-        ('num', numerical_transformer, numerical_cols),
-        ('cat', categorical_transformer, categorical_cols)
-    ],
-    remainder='passthrough'  # Keep other columns (like lat, lon, size, down_payment_price)
-)
+# Correlation heatmap
+numeric_df = df.select_dtypes(include=[np.number])
+plt.figure(figsize=(12, 8))
+sns.heatmap(numeric_df.corr(), annot=True, cmap='coolwarm', fmt='.2f')
+plt.title('Correlation Matrix')
+plt.tight_layout()
+plt.show()
 
-X = df.drop(columns='price')
+
+# 5. Feature Engineering
+df['price_per_sqm'] = df['price'] / df['size']
+df['total_rooms'] = df['bedrooms'].astype(float) + df['bathrooms'].astype(float)
+
+
+# Prepare Features 
+categorical_cols = ['property_type', 'city', 'town', 'district/compound',
+                    'completion_status', 'furnished']
+numerical_cols   = ['lat', 'lon', 'bedrooms', 'bathrooms', 'size',
+                    'down_payment_price', 'total_rooms']
+
+X = df[categorical_cols + numerical_cols]
 y = df['price']
 
-# Split into train and test sets
-X_train, X_test, y_train, y_test = train_test_split(df.drop(columns='price'), df['price'], test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Define base estimator
+# Preprocessing
+column_trans = ColumnTransformer(transformers=[
+    ('num', MinMaxScaler(), numerical_cols),
+    ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_cols)
+])
+
+
+# Bagging
 base_estimator = DecisionTreeRegressor(max_depth=None, min_samples_leaf=2, random_state=42)
 
-# Bagging Regressor
 bag = BaggingRegressor(
-        estimator=base_estimator,
-        n_estimators=500,
-        max_samples=0.8,
-        max_features=1.0,
-        bootstrap=True,
-        oob_score=True,
-        n_jobs=-1,
-        random_state=42
+    estimator=base_estimator,
+    n_estimators=200,   # reduced from 500 for speed; increase if needed
+    max_samples=0.8,
+    max_features=1.0,
+    bootstrap=True,
+    oob_score=True,
+    n_jobs=-1,
+    random_state=42
 )
-model = Pipeline([('prep', column_trans),  # Use column_trans for preprocessing
-                  ('bag', bag)])
 
-# Fit the model
-model.fit(X_train, y_train)
-print('OOB R²:', model[-1].oob_score_)  # Quick sanity check
+bag_pipeline = Pipeline([('prep', column_trans), ('bag', bag)])
+bag_pipeline.fit(X_train, y_train)
 
+bag_oob = bag_pipeline.named_steps['bag'].oob_score_
+bag_train_r2 = r2_score(y_train, bag_pipeline.predict(X_train))
+bag_test_r2  = r2_score(y_test,  bag_pipeline.predict(X_test))
+bag_mae      = mean_absolute_error(y_test, bag_pipeline.predict(X_test))
+
+print("\n===== Bagging Regressor =====")
+print(f"OOB R²       : {bag_oob:.4f}")
+print(f"Train R²     : {bag_train_r2:.4f}")
+print(f"Test R²      : {bag_test_r2:.4f}")
+print(f"MAE on test  : {bag_mae:,.0f} EGP")
+
+
+# Histgradiantboosting
+
+# Transform data for boost model
 X_train_trans = column_trans.fit_transform(X_train)
-X_test_trans = column_trans.transform(X_test)
+X_test_trans  = column_trans.transform(X_test)
 
-# Convert to dense arrays
-X_train_dense = X_train_trans.toarray()
-X_test_dense = X_test_trans.toarray()
-
-# Train HistGradientBoostingRegressor model
 boost_model = HistGradientBoostingRegressor(
-    learning_rate=0.1,
+    learning_rate=0.05,      # lowered for better generalization
     max_iter=1000,
-    max_depth=10,
+    max_depth=8,             # slightly less deep to reduce overfitting
     early_stopping=True,
     validation_fraction=0.1,
     n_iter_no_change=20,
     random_state=42
 )
 
-boost_model.fit(X_train_dense, y_train)
+boost_model.fit(X_train_trans, y_train)
 
-# Evaluate the model
-y_train_pred = boost_model.predict(X_train_dense)
-y_test_pred = boost_model.predict(X_test_dense)
+y_train_pred = boost_model.predict(X_train_trans)
+y_test_pred  = boost_model.predict(X_test_trans)
 
-print(f"R² on train: {r2_score(y_train, y_train_pred):.4f}")
-print(f"R² on test : {r2_score(y_test, y_test_pred):.4f}")
-print('MAE on test:', mean_absolute_error(y_test, y_test_pred))
-print('MSE on test:', mean_squared_error(y_test, y_test_pred))
-print('RMSE on test:', np.sqrt(mean_squared_error(y_test, y_test_pred)))
+print("\n===== HistGradientBoosting Regressor =====")
+print(f"Train R²  : {r2_score(y_train, y_train_pred):.4f}")
+print(f"Test R²   : {r2_score(y_test,  y_test_pred):.4f}")
+print(f"MAE       : {mean_absolute_error(y_test, y_test_pred):,.0f} EGP")
+print(f"RMSE      : {np.sqrt(mean_squared_error(y_test, y_test_pred)):,.0f} EGP")
 
-# Display results
-results = pd.DataFrame({
-    'Actual Price (EGP)': y_test.values,
-    'Predicted Price (EGP)': y_test_pred
+
+# Model Comparison
+comparison = pd.DataFrame({
+    'Model'  : ['Bagging Regressor', 'HistGradientBoosting'],
+    'Train R²': [round(bag_train_r2, 4), round(r2_score(y_train, y_train_pred), 4)],
+    'Test R²' : [round(bag_test_r2,  4), round(r2_score(y_test,  y_test_pred),  4)],
+    'MAE (EGP)': [f"{bag_mae:,.0f}", f"{mean_absolute_error(y_test, y_test_pred):,.0f}"]
 })
+print("\n===== Model Comparison =====")
+print(comparison.to_string(index=False))
 
-display(
-    results.head(20).style.format({
-        'Actual Price (EGP)': '{:,.0f}',
-        'Predicted Price (EGP)': '{:,.0f}'
-    })
-)
 
-# Plot Actual vs Predicted Prices
-plt.scatter(y_test, y_test_pred, alpha=0.3)
+# Actual VS Predicted
+plt.figure(figsize=(8, 6))
+plt.scatter(y_test, y_test_pred, alpha=0.3, color='steelblue', label='Predictions')
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', label='Perfect Fit')
 plt.xlabel("Actual Price (EGP)")
 plt.ylabel("Predicted Price (EGP)")
-plt.title("Actual vs Predicted Prices")
-plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--')
+plt.title("Actual vs Predicted Prices — HistGradientBoosting")
+plt.legend()
+plt.tight_layout()
 plt.show()
+
+# Residuals plot
+residuals = y_test - y_test_pred
+plt.figure(figsize=(8, 5))
+sns.histplot(residuals, bins=40, kde=True, color='coral')
+plt.axvline(0, color='black', linestyle='--')
+plt.title('Residuals Distribution')
+plt.xlabel('Residual (Actual - Predicted)')
+plt.tight_layout()
+plt.show()
+
+
+# Top 10
+results = pd.DataFrame({
+    'Actual Price (EGP)'   : y_test.values,
+    'Predicted Price (EGP)': y_test_pred.round(0)
+})
+results['Error (EGP)'] = (results['Actual Price (EGP)'] - results['Predicted Price (EGP)']).abs()
+results['Error %'] = (results['Error (EGP)'] / results['Actual Price (EGP)'] * 100).round(2)
+
+print("\nTop 10 Predictions:")
+print(results.head(10).to_string(index=False))
